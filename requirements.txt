@@ -1,0 +1,4 @@
+demjson
+ipython
+lxml
+requests
