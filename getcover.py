@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
+import argparse
+import html
 import re
 
 from collections import defaultdict
-from lxml import html
+from lxml import html as xmlhtml
 
 import demjson
 import requests
+
+from unidecode import unidecode
 
 
 def _get_data(name, url, datafile):
@@ -33,12 +37,19 @@ def do_qynamic(coverage):
     regions = demjson.decode(regions)
 
     for region in regions:
+        name = unidecode(html.unescape(region["value"]))
+        try:
+            code = re.search(r"(..)\.png", region["flag"]).group(1)
+        except:
+            code = None
+        key = code or name
         if "Global+" in region["data"]:
-            coverage[region["value"]].append("Qynamic Global+")
+            coverage[key]["list"].append("Qynamic Global+")
         elif "Global" in region["data"]:
-            coverage[region["value"]].append("Qynamic Global")
-        else:
-            coverage[region["value"]]
+            coverage[key]["list"].append("Qynamic Global")
+
+        if not coverage[key]["name"]:
+            coverage[key]["name"] = name
 
 
 def do_mtx(coverage):
@@ -47,37 +58,50 @@ def do_mtx(coverage):
     datafile = "data_mtx"
 
     data = _get_data(name, url, datafile)
-    tree = html.fromstring(data)
+    tree = xmlhtml.fromstring(data)
 
     # regions = list(map(lambda x: x.strip(), tree.xpath("//ul[@class='country_list']/li/a/text()[normalize-space() != '']")))
     regions = []
     for node in tree.xpath("//ul[@class='country_list']/li/a"):
-        regions.append(' '.join(map(lambda x: x.strip(), node.xpath("text()[normalize-space() != '']"))))
+        name = unidecode(html.unescape(' '.join(map(lambda x: x.strip(), node.xpath("text()[normalize-space() != '']")))))
+        code = node.attrib["id"].lower() or name
+        regions.append((code, name))
 
-    for region in regions:
-        if region[-1] == "*":
-            coverage[region[:-1]].append("MTX*")
+    for code, name in regions:
+        if name[-1] == "*":
+            coverage[code]["list"].append("MTX*")
+            if not coverage[code]["name"]:
+                coverage[code]["name"] = name[:-1]
         else:
-            coverage[region].append("MTX")
+            coverage[code]["list"].append("MTX")
+            if not coverage[code]["name"]:
+                coverage[code]["name"] = name
 
 
-def write_output(coverage):
+def write_output(coverage, all_countries):
     outfile = "coverage.csv"
 
     with open(outfile, "wb") as output:
-        for region, opts in sorted(coverage.items()):
-            optstr = ','.join(map(lambda x: f'"{x}"', opts))
-            output.write(f"\"{region}\",{optstr}\n".encode("iso-8859-1"))
+        for code, data in sorted(coverage.items(), key=lambda kv: kv[1]["name"]):
+            if data["list"] or all_countries:
+                optstr = ','.join(map(lambda x: f'"{x}"', data["list"]))
+                output.write(f"\"{data['name']}\",{optstr}\n".encode("iso-8859-1", "replace"))
 
     print(f"Wrote coverage data to '{outfile}")
 
 
-def main():
-    coverage = defaultdict(lambda: [])
+def main(all_countries):
+    coverage = defaultdict(lambda: {'name': '', 'list': []})
 
     do_qynamic(coverage)
     do_mtx(coverage)
-    write_output(coverage)
+    write_output(coverage, all_countries)
+
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Create a CSV showing data roaming coverage.")
+    parser.add_argument("-a", "--all", action="store_true",
+                        help="show all listed countries, even if no coverage is reported")
+    args = parser.parse_args()
+
+    main(args.all)

@@ -2,3 +2,4 @@ demjson
 ipython
 lxml
 requests
+unidecode
